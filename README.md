@@ -34,7 +34,7 @@ chapter07_bounds/        Bounds on time averages, parameter-dependent
                          bounds, background methods, and extreme events
 chapter08_measures/      Invariant measures, moment relaxations,
                          ergodic optimization, and duality
-chapter09_data_driven/   Data-driven polynomial optimization,
+chapter09_data/          Data-driven polynomial optimization,
                          Koopman and Perron--Frobenius methods
 chapter10_extensions/    Advanced topics and extensions
 ```
