@@ -22,9 +22,7 @@ Running each script should reproduce the numerical results and figures appearing
 
 Illustrates the distinction between global SOS certificates and Putinar certificates on semialgebraic sets using the Motzkin polynomial
 
-\[
-m(x,y)=x^4y^2+x^2y^4+1-3x^2y^2.
-\]
+m(x,y) = x^4 y^2 + x^2 y^4 + 1 - 3 x^2 y^2.
 
 The script:
 
@@ -46,11 +44,9 @@ Demonstrates SOS certification of sublevel set containment.
 
 Given two polynomial functions \(p(x,y)\) and \(q(x,y)\), the script computes the largest certified value \(c\) such that
 
-\[
-\{(x,y):p(x,y)\le c\}
-\subseteq
-\{(x,y):q(x,y)\le 1\}
-\]
+{(x,y) : p(x,y) <= c}
+    contained in
+{(x,y) : q(x,y) <= 1}.
 
 within a prescribed ambient semialgebraic set.
 
