@@ -48,12 +48,11 @@ and computations appearing in the book.
 If you use the code in this repository, please cite:
 
 ```bibtex
-@book{Bramburger2027,
+@book{Bramburger2026polynomial,
   author    = {Jason Bramburger},
   title     = {Polynomial Optimization Methods for Dynamical Systems:
                Auxiliary Functions, Sum-of-Squares Programming, and Applications},
-  publisher = {TBD},
-  year      = {2027}
+  year      = {2026}
 }
 ```
 
