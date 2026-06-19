@@ -27,13 +27,21 @@ Specific requirements are indicated in the documentation for each chapter.
 ## Repository Structure
 
 ```text
-chapter05_sos/
-chapter06_feasibility/
-chapter07_bounds/
-chapter08_measures/
-chapter09_data_driven/
-chapter10_extensions/
+chapter05_sos/           Polynomial optimization and SOS programming
+chapter06_feasibility/   Lyapunov functions, regions of attraction,
+                         trapping regions, and control certificates
+chapter07_bounds/        Bounds on time averages, parameter-dependent
+                         bounds, background methods, and extreme events
+chapter08_measures/      Invariant measures, moment relaxations,
+                         ergodic optimization, and duality
+chapter09_data_driven/   Data-driven polynomial optimization,
+                         Koopman and Perron--Frobenius methods
+chapter10_extensions/    Advanced topics and extensions
 ```
+
+Each chapter directory contains a README file describing the associated
+examples and listing the MATLAB scripts required to reproduce the figures
+and computations appearing in the book.
 
 ## Citation
 
