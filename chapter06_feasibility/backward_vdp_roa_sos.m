@@ -358,7 +358,7 @@ function [exps, nfree] = even_exponents_2d_from_degree4(d)
     for total = 4:2:d
         for i = 0:total
             j = total - i;
-            exps = [exps; i j]; %#ok<AGROW>
+            exps = [exps; i j]; 
         end
     end
 
@@ -486,7 +486,7 @@ function [p, coeff] = even_polynomial_2d(x, y, deg)
         for i = 0:total
             j = total - i;
             a = sdpvar(1,1);
-            coeff = [coeff; a]; %#ok<AGROW>
+            coeff = [coeff; a]; 
             p = p + a*x^i*y^j;
         end
     end

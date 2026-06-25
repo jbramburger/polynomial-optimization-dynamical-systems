@@ -464,7 +464,7 @@ function [exps, nfree] = monomial_exponents_3d(min_degree, max_degree)
         for i = 0:total
             for j = 0:(total-i)
                 k = total - i - j;
-                exps = [exps; i j k]; %#ok<AGROW>
+                exps = [exps; i j k]; 
             end
         end
     end

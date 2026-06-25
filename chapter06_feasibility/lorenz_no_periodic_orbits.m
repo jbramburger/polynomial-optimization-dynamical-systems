@@ -390,7 +390,7 @@ function [V, coeff] = symmetric_polynomial_lorenz(X, Y, Z, deg)
                 end
 
                 a = sdpvar(1,1);
-                coeff = [coeff; a]; %#ok<AGROW>
+                coeff = [coeff; a]; 
                 V = V + a*X^i*Y^j*Z^k;
             end
         end
@@ -411,7 +411,7 @@ function [p, coeff] = full_polynomial_3d(X, Y, Z, deg)
                 k = total - i - j;
 
                 a = sdpvar(1,1);
-                coeff = [coeff; a]; %#ok<AGROW>
+                coeff = [coeff; a]; 
                 p = p + a*X^i*Y^j*Z^k;
             end
         end

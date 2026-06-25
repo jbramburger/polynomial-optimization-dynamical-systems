@@ -177,7 +177,7 @@ for n = 2:n_dense_max
 
     dense_results = [dense_results; ...
         n, ncoeff_dense, nmon_V, nmon_Vdot, gram_deg4, gram_deg6, ...
-        td, sold.problem]; %#ok<AGROW>
+        td, sold.problem]; 
 
     if sold.problem ~= 0
         fprintf('  Dense search failed here. Stopping dense sweep.\n');
@@ -242,7 +242,7 @@ for n = 2:n_sparse_max
 
     sparse_results = [sparse_results; ...
         n, ncoeff_sparse, nmon_V, nmon_Vdot, gram_deg4, gram_deg6, ...
-        ts, sols.problem]; %#ok<AGROW>
+        ts, sols.problem]; 
 
     if sols.problem == 0
         fprintf('  recovered coefficients         : a = %.6g, b = %.6g, c = %.6g\n', ...
