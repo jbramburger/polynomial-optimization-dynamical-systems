@@ -1,66 +1,39 @@
-# Chapter 5: Polynomial Optimization and Sum-of-Squares Programming
+# Chapter 5 — Polynomial Optimization and Sum-of-Squares Programming
 
-This directory contains the MATLAB scripts accompanying the examples from Chapter 5 of
+This directory contains the MATLAB scripts accompanying Chapter 5 of
 
-> **Polynomial Optimization Methods for Dynamical Systems: Auxiliary Functions, Sum-of-Squares Programming, and Applications**
->
+> **Polynomial Optimization Methods for Dynamical Systems: Auxiliary Functions, Sum-of-Squares Programming, and Applications**  
 > Jason Bramburger
+
+The examples introduce fundamental concepts in polynomial optimization and sum-of-squares programming, including global polynomial optimization, Putinar certificates on semialgebraic sets, and certification of sublevel set containment.
 
 ## Requirements
 
-All scripts in this directory require:
+All scripts require
 
 - MATLAB
 - YALMIP
 - MOSEK
 
-Running each script should reproduce the numerical results and figures appearing in the corresponding examples of the book.
+Running each script reproduces the numerical results and figures appearing in the corresponding examples of the book.
 
 ## Scripts
 
-### `motzkin_global_vs_putinar.m`
-
-Illustrates the distinction between global SOS certificates and Putinar certificates on semialgebraic sets using the Motzkin polynomial
-
-m(x,y) = x^4 y^2 + x^2 y^4 + 1 - 3 x^2 y^2.
-
-The script:
-
-- Tests whether the Motzkin polynomial is SOS.
-- Computes the best global SOS lower bound.
-- Computes a Putinar lower bound on the unit disk.
-- Produces a contour plot showing the global and constrained minimizers.
-
-**Output**
-
-- Numerical lower bounds printed to the MATLAB command window.
-- Figure saved as `motzkin.pdf`.
-
----
-
-### `sublevel_containment_example.m`
-
-Demonstrates SOS certification of sublevel set containment.
-
-Given two polynomial functions \(p(x,y)\) and \(q(x,y)\), the script computes the largest certified value \(c\) such that
-
-{(x,y) : p(x,y) <= c}
-    contained in
-{(x,y) : q(x,y) <= 1}.
-
-within a prescribed ambient semialgebraic set.
-
-The script:
-
-- Constructs a Putinar certificate for sublevel set containment.
-- Uses bisection to determine the largest certified value of \(c\).
-- Produces a visualization of the certified containment.
-
-**Output**
-
-- Certified value of \(c\).
-- Figure saved as `sublevel_containment.pdf`.
+| Script | Description |
+|---|---|
+| `motzkin_global_vs_putinar.m` | Illustrates the distinction between global SOS certificates and Putinar certificates using the Motzkin polynomial. Computes the best global SOS lower bound, the best Putinar lower bound on the unit disk, and visualizes the corresponding minimizers. |
+| `sublevel_containment_example.m` | Computes the largest certified polynomial sublevel set contained within another semialgebraic set using a Putinar certificate and visualizes the certified containment. |
 
 ## Notes
 
-These examples are intended to illustrate the construction and interpretation of sum-of-squares certificates rather than large-scale optimization. Readers are encouraged to modify the polynomial functions, semialgebraic sets, and relaxation degrees to explore the behavior of the resulting certificates.
+These examples are intended to illustrate the construction and interpretation of sum-of-squares certificates rather than large-scale optimization. The scripts are self-contained and are designed to be run directly from MATLAB. Readers are encouraged to modify the polynomial functions, semialgebraic sets, and relaxation degrees to explore the behavior of the resulting certificates.
+
+## Output
+
+Depending on the script, running an example produces
+
+- printed numerical results,
+- PDF figures, and
+- MATLAB data files (where appropriate).
+
+All output files are written to the current working directory.
