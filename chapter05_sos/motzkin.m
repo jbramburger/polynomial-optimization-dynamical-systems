@@ -13,7 +13,8 @@
 % The script:
 %
 %   1. Tests whether m(x,y) is globally SOS.
-%   2. Computes the best global SOS lower bound for m(x,y).
+%   2. Attempts the global SOS lower-bound problem and verifies that it is
+%      infeasible: m(x,y) - gamma is not SOS for any constant gamma.
 %   3. Computes a Putinar-type SOS lower bound on the unit disk.
 %   4. Produces the contour figure used in the book.
 %
@@ -57,16 +58,21 @@ m = x^4*y^2 + x^2*y^4 + 1 - 3*x^2*y^2;
 
 sol_zero = solvesos(sos(m), [], opts);
 
-%% 2. Global SOS lower bound
+%% 2. Attempt a global SOS lower bound
 
-Fglob = [sos(m - gamma), -10 <= gamma <= 1];
+% No artificial lower bound is imposed on gamma. In particular, a value such
+% as gamma = -10 must not be mistaken for a feasible SOS lower bound after an
+% unsuccessful solver call.
+Fglob = sos(m - gamma);
 sol_glob = solvesos(Fglob, -gamma, opts, gamma);
 
-if sol_glob.problem ~= 0
-    warning('Global SOS optimization returned: %s', sol_glob.info);
-end
+global_sos_feasible = (sol_glob.problem == 0);
 
-gamma_global = value(gamma);
+if global_sos_feasible
+    gamma_global = value(gamma);
+else
+    gamma_global = NaN;
+end
 
 %% 3. Putinar lower bound on the unit disk
 
@@ -86,11 +92,14 @@ Fdisk = [
 
 sol_disk = solvesos(Fdisk, -gamma, opts, [gamma; c0; c1]);
 
-if sol_disk.problem ~= 0
-    warning('Putinar optimization returned: %s', sol_disk.info);
-end
+disk_sos_feasible = (sol_disk.problem == 0);
 
-gamma_disk = value(gamma);
+if disk_sos_feasible
+    gamma_disk = value(gamma);
+else
+    gamma_disk = NaN;
+    warning('Putinar optimization failed: %s', sol_disk.info);
+end
 
 %% Exact values and minimizers
 
@@ -115,18 +124,30 @@ fprintf('Motzkin polynomial: global SOS versus Putinar on the disk\n');
 fprintf('============================================================\n\n');
 
 fprintf('True global minimum on R^2:        %.12f\n', true_global_min);
-fprintf('Computed global SOS lower bound:  %.12f\n', gamma_global);
-fprintf('Gap:                              %.12e\n\n', ...
-    true_global_min - gamma_global);
+if global_sos_feasible
+    fprintf('Computed global SOS lower bound:  %.12f\n', gamma_global);
+    fprintf('Gap:                              %.12e\n\n', ...
+        true_global_min - gamma_global);
+else
+    fprintf('Global SOS lower-bound problem:    infeasible\n');
+    fprintf('No constant gamma makes m-gamma SOS.\n');
+    fprintf('  solver status code: %d\n', sol_glob.problem);
+    fprintf('  solver message:     %s\n\n', sol_glob.info);
+end
 
 fprintf('Direct SOS feasibility test for m(x,y):\n');
 fprintf('  solver status code: %d\n', sol_zero.problem);
 fprintf('  solver message:     %s\n\n', sol_zero.info);
 
 fprintf('True minimum on the unit disk:     %.12f\n', true_disk_min);
-fprintf('Computed Putinar lower bound:      %.12f\n', gamma_disk);
-fprintf('Gap:                               %.12e\n\n', ...
-    true_disk_min - gamma_disk);
+if disk_sos_feasible
+    fprintf('Computed Putinar lower bound:      %.12f\n', gamma_disk);
+    fprintf('Gap:                               %.12e\n\n', ...
+        true_disk_min - gamma_disk);
+else
+    fprintf('Putinar lower-bound problem:       solver failure\n');
+    fprintf('No numerical bound is reported.\n\n');
+end
 
 fprintf('Global minimizers:\n');
 disp(global_min_pts);
