@@ -22,10 +22,10 @@
 %
 % Pressing Run should reproduce the numerical output and save:
 %
-%     lorenz_occ_density_T_0p5.png
-%     lorenz_occ_density_T_1.png
-%     lorenz_occ_density_T_5.png
-%     lorenz_occ_density_T_10.png
+%     lorenz_occ_density_T_0p5.pdf
+%     lorenz_occ_density_T_1.pdf
+%     lorenz_occ_density_T_5.pdf
+%     lorenz_occ_density_T_10.pdf
 %
 % Requirements:
 %   - MATLAB
@@ -265,8 +265,7 @@ for kk = 1:numel(terminalTimes)
 
     T = terminalTimes(kk);
 
-    fig = figure;
-    set(fig,'Color','w','Units','centimeters','Position',[2 2 14 11]);
+    fig = figure('Color','w','Position',[100 100 1100 900]);
 
     ax = axes('Parent',fig);
     hold(ax,'on');
@@ -304,11 +303,11 @@ for kk = 1:numel(terminalTimes)
 
     view(ax,35,22);
 
-    set(ax,'FontSize',32,'TickLabelInterpreter','latex');
+    set(ax,'FontSize',46);
 
-    xlabel(ax,'$x$','Interpreter','latex','FontSize',42,'FontWeight','bold');
-    ylabel(ax,'$y$','Interpreter','latex','FontSize',42,'FontWeight','bold');
-    zlabel(ax,'$z$','Interpreter','latex','FontSize',42,'FontWeight','bold');
+    xlabel(ax,'$x$','Interpreter','latex','FontSize',56,'FontWeight','bold');
+    ylabel(ax,'$y$','Interpreter','latex','FontSize',56,'FontWeight','bold');
+    zlabel(ax,'$z$','Interpreter','latex','FontSize',56,'FontWeight','bold');
 
     axis(ax,'equal');
     axis(ax,'tight');
@@ -316,9 +315,8 @@ for kk = 1:numel(terminalTimes)
     box(ax,'on');
 
     if saveFigures
-        fileName = sprintf('lorenz_occ_density_T_%s.png', time_to_filename(T));
-        exportgraphics(fig,fileName,'Resolution',600,'BackgroundColor','white');
-        fprintf('Saved figure: %s\n', fileName);
+        fileName = sprintf('lorenz_occ_density_T_%s.pdf', time_to_filename(T));
+        save_pdf_figure(fig,fileName);
     end
 end
 
@@ -764,4 +762,19 @@ function str = time_to_filename(T)
     str = sprintf('%.10g',T);
     str = strrep(str,'.','p');
     str = strrep(str,'-','m');
+end
+
+function save_pdf_figure(fig,fileName)
+
+    set(fig,'PaperUnits','centimeters');
+    set(fig,'Units','centimeters');
+
+    pos = get(fig,'Position');
+
+    set(fig,'PaperSize',[pos(3) pos(4)]);
+    set(fig,'PaperPositionMode','manual');
+    set(fig,'PaperPosition',[0 0 pos(3) pos(4)]);
+
+    print(fig,'-dpdf',fileName);
+    fprintf('Saved figure: %s\n',fileName);
 end
