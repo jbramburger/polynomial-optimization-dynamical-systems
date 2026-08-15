@@ -6,20 +6,23 @@
 % Example: Occupation-measure transport for the Lorenz system
 %
 % This script computes finite-time terminal measures for the Lorenz system
-% using an occupation-measure moment SDP.
+% using a time-state occupation-measure moment SDP.
 %
 % The Lorenz system is first rescaled to a unit cube containing a numerically
 % observed attractor. The initial measure is a uniform probability measure
 % on a small ball in one lobe. For each terminal time T, the script solves
 % the Liouville moment constraints
 %
-%     int grad(p).f dmu = int p dmu_T - int p dmu_0
+% Time is normalized by s=t/T, so the implemented constraints are
+%
+%     int (partial_s v + T*grad_x(v).f) deta_bar
+%         = int v(1,x) dmu_T - int v(0,x) dmu_0.
 %
 % and reconstructs a polynomial density for the terminal measure.
 %
 % Pressing Run should reproduce the numerical output and save:
 %
-%     lorenz_occ_density_T_0.5.png
+%     lorenz_occ_density_T_0p5.png
 %     lorenz_occ_density_T_1.png
 %     lorenz_occ_density_T_5.png
 %     lorenz_occ_density_T_10.png
@@ -51,6 +54,7 @@ initialCenterScaled = [0.746040; 0.331799; 0.668536];
 initialRadiusScaled = 0.025;
 
 numInitialPlotPoints = 1200;
+numValidationPoints = 250;
 
 solver_name = 'mosek';
 verbose_solver = 1;
@@ -113,18 +117,26 @@ fprintf('  radius = %.6f\n\n', initialRadiusScaled);
 vectorFieldTerms = scaled_lorenz_polynomial_terms( ...
     center(:), scale(:), sigma, rho, beta);
 
-basis = monomial_basis_3d(momentDegree);
-numMoments = size(basis,1);
-idx = make_index_map_3d(basis);
+basisState = monomial_basis_3d(momentDegree);
+numStateMoments = size(basisState,1);
+idxState = make_index_map_3d(basisState);
+
+basisOcc = monomial_basis_4d(momentDegree);
+numOccMoments = size(basisOcc,1);
+idxOcc = make_index_map_4d(basisOcc);
 
 %% Prescribed initial moments
 
-initialMoments = zeros(numMoments,1);
+initialMoments = zeros(numStateMoments,1);
 
-for k = 1:numMoments
+for k = 1:numStateMoments
     initialMoments(k) = shifted_ball_moment( ...
-        basis(k,:), initialCenterScaled(:).', initialRadiusScaled);
+        basisState(k,:), initialCenterScaled(:).', initialRadiusScaled);
 end
+
+Y0validation = sample_ball(numValidationPoints, ...
+    initialCenterScaled(:).', initialRadiusScaled);
+X0validation = Y0validation.*scale + center;
 
 %% Solve occupation-measure SDP for each terminal time
 
@@ -138,42 +150,50 @@ for kk = 1:numel(terminalTimes)
     fprintf('Solving occupation-measure SDP for T = %g\n', T);
     fprintf('------------------------------------------------------------\n');
 
-    yOcc  = sdpvar(numMoments,1);
-    yTerm = sdpvar(numMoments,1);
+    yOcc  = sdpvar(numOccMoments,1);
+    yTerm = sdpvar(numStateMoments,1);
 
     constraints = [];
 
     %% Liouville constraints
 
     constraints = [constraints, build_liouville_constraints( ...
-        yOcc, yTerm, initialMoments, basis, idx, ...
-        vectorFieldTerms, momentDegree)];
+        yOcc, yTerm, initialMoments, basisOcc, idxOcc, idxState, ...
+        vectorFieldTerms, momentDegree, T)];
 
     %% Mass constraints
 
     constraints = [
         constraints, ...
-        moment_expr_3d(yOcc,idx,0,0,0)  == T, ...
-        moment_expr_3d(yTerm,idx,0,0,0) == 1
+        moment_expr_4d(yOcc,idxOcc,0,0,0,0) == 1, ...
+        moment_expr_3d(yTerm,idxState,0,0,0) == 1
         ];
 
     %% Support constraints on K = [-1,1]^3
 
-    basisMoment = monomial_basis_3d(floor(momentDegree/2));
+    basisMomentOcc = monomial_basis_4d(floor(momentDegree/2));
+    basisMomentState = monomial_basis_3d(floor(momentDegree/2));
 
     constraints = [
         constraints, ...
-        build_moment_matrix_3d(yOcc,idx,basisMoment)  >= 0, ...
-        build_moment_matrix_3d(yTerm,idx,basisMoment) >= 0
+        build_moment_matrix_4d(yOcc,idxOcc,basisMomentOcc) >= 0, ...
+        build_moment_matrix_3d(yTerm,idxState,basisMomentState) >= 0
         ];
 
-    basisLocalizing = monomial_basis_3d(floor((momentDegree-2)/2));
+    basisLocalizingOcc = monomial_basis_4d(floor((momentDegree-2)/2));
+    basisLocalizingState = monomial_basis_3d(floor((momentDegree-2)/2));
+
+    constraints = [constraints, ...
+        build_time_localizing_matrix_4d( ...
+            yOcc,idxOcc,basisLocalizingOcc) >= 0];
 
     for coord = 1:3
         constraints = [
             constraints, ...
-            build_cube_localizing_matrix_3d(yOcc,idx,basisLocalizing,coord)  >= 0, ...
-            build_cube_localizing_matrix_3d(yTerm,idx,basisLocalizing,coord) >= 0
+            build_cube_localizing_matrix_4d( ...
+                yOcc,idxOcc,basisLocalizingOcc,coord) >= 0, ...
+            build_cube_localizing_matrix_3d( ...
+                yTerm,idxState,basisLocalizingState,coord) >= 0
             ]; %#ok<AGROW>
     end
 
@@ -192,16 +212,21 @@ for kk = 1:numel(terminalTimes)
     yTermValue = value(yTerm);
     terminalMoments{kk} = yTermValue;
 
-    terminalMass = yTermValue(get_idx_3d(idx,0,0,0));
+    terminalMass = yTermValue(get_idx_3d(idxState,0,0,0));
 
     terminalMean = [
-        yTermValue(get_idx_3d(idx,1,0,0));
-        yTermValue(get_idx_3d(idx,0,1,0));
-        yTermValue(get_idx_3d(idx,0,0,1))
+        yTermValue(get_idx_3d(idxState,1,0,0));
+        yTermValue(get_idx_3d(idxState,0,1,0));
+        yTermValue(get_idx_3d(idxState,0,0,1))
     ]/terminalMass;
+
+    terminalMeanMC = monte_carlo_terminal_mean( ...
+        X0validation,T,sigma,rho,beta,center,scale,optsODE);
 
     fprintf('  terminal mass = %.8f\n', terminalMass);
     fprintf('  terminal mean = [% .6f % .6f % .6f]\n', terminalMean);
+    fprintf('  Monte Carlo   = [% .6f % .6f % .6f]\n', terminalMeanMC);
+    fprintf('  mean error    = %.3e\n', norm(terminalMean-terminalMeanMC));
 end
 
 %% Reconstruct terminal densities on the cube and evaluate on attractor
@@ -215,7 +240,7 @@ for kk = 1:numel(terminalTimes)
     fprintf('\nReconstructing density for T = %g\n', T);
 
     [densityCoeff,densityBasis] = reconstruct_density_cube_3d( ...
-        terminalMoments{kk}, basis, momentDegree);
+        terminalMoments{kk}, basisState, momentDegree);
 
     rhoAttr = zeros(size(Yattr,1),1);
 
@@ -348,48 +373,56 @@ function F = scaled_lorenz_polynomial_terms(center,scale,sigma,rho,beta)
 end
 
 function constraints = build_liouville_constraints( ...
-    yOcc, yTerm, yInitial, basis, idx, Fpoly, d)
+    yOcc, yTerm, yInitial, basisOcc, idxOcc, idxState, Fpoly, d, T)
 
     degf = 2;
     testDegree = d + 1 - degf;
 
-    basisTest = basis(sum(basis,2) <= testDegree,:);
+    basisTest = basisOcc(sum(basisOcc,2) <= testDegree,:);
 
     constraints = [];
 
     for k = 1:size(basisTest,1)
 
-        alpha = basisTest(k,:);
-
-        if all(alpha == 0)
-            continue;
-        end
+        exponent = basisTest(k,:);
+        kt = exponent(1);
+        alpha = exponent(2:4);
 
         expr = 0;
 
+        if kt > 0
+            expr = expr + kt*moment_expr_4d( ...
+                yOcc,idxOcc,kt-1,alpha(1),alpha(2),alpha(3));
+        end
+
         if alpha(1) > 0
-            expr = expr + alpha(1)*apply_vector_field_terms( ...
-                yOcc,idx,alpha-[1 0 0],Fpoly{1});
+            expr = expr + T*alpha(1)*apply_vector_field_terms_4d( ...
+                yOcc,idxOcc,kt,alpha-[1 0 0],Fpoly{1});
         end
 
         if alpha(2) > 0
-            expr = expr + alpha(2)*apply_vector_field_terms( ...
-                yOcc,idx,alpha-[0 1 0],Fpoly{2});
+            expr = expr + T*alpha(2)*apply_vector_field_terms_4d( ...
+                yOcc,idxOcc,kt,alpha-[0 1 0],Fpoly{2});
         end
 
         if alpha(3) > 0
-            expr = expr + alpha(3)*apply_vector_field_terms( ...
-                yOcc,idx,alpha-[0 0 1],Fpoly{3});
+            expr = expr + T*alpha(3)*apply_vector_field_terms_4d( ...
+                yOcc,idxOcc,kt,alpha-[0 0 1],Fpoly{3});
         end
 
-        rhs = yTerm(get_idx_3d(idx,alpha(1),alpha(2),alpha(3))) ...
-            - yInitial(get_idx_3d(idx,alpha(1),alpha(2),alpha(3)));
+        rhs = yTerm(get_idx_3d( ...
+            idxState,alpha(1),alpha(2),alpha(3)));
+
+        if kt == 0
+            rhs = rhs - yInitial(get_idx_3d( ...
+                idxState,alpha(1),alpha(2),alpha(3)));
+        end
 
         constraints = [constraints, expr == rhs]; %#ok<AGROW>
     end
 end
 
-function expr = apply_vector_field_terms(y,idx,baseExp,terms)
+function expr = apply_vector_field_terms_4d(y,idx,kt,baseExp,terms)
 
     expr = 0;
 
@@ -398,8 +431,8 @@ function expr = apply_vector_field_terms(y,idx,baseExp,terms)
         coeff = terms(r,1);
         expv = baseExp + terms(r,2:4);
 
-        expr = expr + coeff*moment_expr_3d( ...
-            y,idx,expv(1),expv(2),expv(3));
+        expr = expr + coeff*moment_expr_4d( ...
+            y,idx,kt,expv(1),expv(2),expv(3));
     end
 end
 
@@ -417,12 +450,38 @@ function basis = monomial_basis_3d(d)
     end
 end
 
+function basis = monomial_basis_4d(d)
+
+    basis = [];
+
+    for total = 0:d
+        for kt = 0:total
+            for a = 0:(total-kt)
+                for b = 0:(total-kt-a)
+                    c = total - kt - a - b;
+                    basis = [basis; kt a b c]; %#ok<AGROW>
+                end
+            end
+        end
+    end
+end
+
 function idx = make_index_map_3d(basis)
 
     idx = containers.Map();
 
     for k = 1:size(basis,1)
         idx(sprintf('%d_%d_%d',basis(k,1),basis(k,2),basis(k,3))) = k;
+    end
+end
+
+function idx = make_index_map_4d(basis)
+
+    idx = containers.Map();
+
+    for k = 1:size(basis,1)
+        idx(sprintf('%d_%d_%d_%d',basis(k,1),basis(k,2), ...
+            basis(k,3),basis(k,4))) = k;
     end
 end
 
@@ -437,9 +496,26 @@ function k = get_idx_3d(idx,a,b,c)
     k = idx(key);
 end
 
+function k = get_idx_4d(idx,kt,a,b,c)
+
+    key = sprintf('%d_%d_%d_%d',kt,a,b,c);
+
+    if ~isKey(idx,key)
+        error('Moment (%d,%d,%d,%d) exceeds truncation degree.', ...
+            kt,a,b,c);
+    end
+
+    k = idx(key);
+end
+
 function expr = moment_expr_3d(y,idx,a,b,c)
 
     expr = y(get_idx_3d(idx,a,b,c));
+end
+
+function expr = moment_expr_4d(y,idx,kt,a,b,c)
+
+    expr = y(get_idx_4d(idx,kt,a,b,c));
 end
 
 function M = build_moment_matrix_3d(y,idx,basisMoment)
@@ -453,6 +529,23 @@ function M = build_moment_matrix_3d(y,idx,basisMoment)
             a = basisMoment(i,:) + basisMoment(j,:);
 
             M(i,j) = moment_expr_3d(y,idx,a(1),a(2),a(3));
+            M(j,i) = M(i,j);
+        end
+    end
+end
+
+function M = build_moment_matrix_4d(y,idx,basisMoment)
+
+    n = size(basisMoment,1);
+    M = sdpvar(n,n,'symmetric');
+
+    for i = 1:n
+        for j = i:n
+
+            a = basisMoment(i,:) + basisMoment(j,:);
+
+            M(i,j) = moment_expr_4d( ...
+                y,idx,a(1),a(2),a(3),a(4));
             M(j,i) = M(i,j);
         end
     end
@@ -475,6 +568,55 @@ function Mg = build_cube_localizing_matrix_3d(y,idx,basisLocalizing,coord)
 
             Mg(i,j) = val;
             Mg(j,i) = val;
+        end
+    end
+end
+
+function Mg = build_cube_localizing_matrix_4d( ...
+    y,idx,basisLocalizing,coord)
+
+    n = size(basisLocalizing,1);
+    Mg = sdpvar(n,n,'symmetric');
+
+    for i = 1:n
+        for j = i:n
+
+            a = basisLocalizing(i,:) + basisLocalizing(j,:);
+            ashift = a;
+            ashift(coord+1) = ashift(coord+1) + 2;
+
+            val = moment_expr_4d(y,idx,a(1),a(2),a(3),a(4)) ...
+                - moment_expr_4d(y,idx,ashift(1),ashift(2), ...
+                    ashift(3),ashift(4));
+
+            Mg(i,j) = val;
+            Mg(j,i) = val;
+        end
+    end
+end
+
+function Mt = build_time_localizing_matrix_4d( ...
+    y,idx,basisLocalizing)
+
+    n = size(basisLocalizing,1);
+    Mt = sdpvar(n,n,'symmetric');
+
+    for i = 1:n
+        for j = i:n
+
+            a = basisLocalizing(i,:) + basisLocalizing(j,:);
+            a1 = a;
+            a2 = a;
+            a1(1) = a1(1) + 1;
+            a2(1) = a2(1) + 2;
+
+            val = moment_expr_4d( ...
+                y,idx,a1(1),a1(2),a1(3),a1(4)) ...
+                - moment_expr_4d( ...
+                y,idx,a2(1),a2(2),a2(3),a2(4));
+
+            Mt(i,j) = val;
+            Mt(j,i) = val;
         end
     end
 end
@@ -599,6 +741,22 @@ function q = prctile_no_toolbox(x,p)
     else
         q = x(k0) + (k-k0)*(x(k1)-x(k0));
     end
+end
+
+function meanScaled = monte_carlo_terminal_mean( ...
+    X0,T,sigma,rho,beta,center,scale,optsODE)
+
+    n = size(X0,1);
+    finalScaled = zeros(n,3);
+
+    for j = 1:n
+        [~,trajectory] = ode45( ...
+            @(t,x) lorenz_rhs(t,x,sigma,rho,beta), ...
+            [0 T],X0(j,:).',optsODE);
+        finalScaled(j,:) = (trajectory(end,:)-center)./scale;
+    end
+
+    meanScaled = mean(finalScaled,1).';
 end
 
 function str = time_to_filename(T)
