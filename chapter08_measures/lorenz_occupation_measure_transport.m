@@ -1,4 +1,4 @@
-%% lorenz_occupation_measure_transport_revised3.m
+%% lorenz_occupation_measure_transport_revised4.m
 % Polynomial Optimization Methods for Dynamical Systems
 % Auxiliary Functions, Sum-of-Squares Programming, and Applications
 %
@@ -54,7 +54,10 @@ refinementDegrees = [8 10 12];
 refinementTimes = [1 5];
 
 regularizationWeight = 1e-9;
-runRegularizerSweep = true;
+% The reported chapter computation uses the fixed weight above.  The sweep
+% is an optional numerical diagnostic and is disabled by default so that the
+% baseline implementation remains identical to the reported calculation.
+runRegularizerSweep = false;
 regularizerWeights = [1e-10 1e-9 1e-8];
 
 Tattr = 160;
@@ -179,7 +182,7 @@ end
 
 %% Solve all requested transport relaxations
 
-results = struct([]);
+resultCells = cell(numel(cases),1);
 
 for kk = 1:numel(cases)
     T = cases(kk).T;
@@ -199,24 +202,26 @@ for kk = 1:numel(cases)
     caseResult.meanError = norm(caseResult.mean-caseResult.mcMean);
     caseResult.secondError = norm(caseResult.second-caseResult.mcSecond);
 
-    % Append only after every field has been added.  Otherwise the first
-    % iteration changes the field layout of results, and MATLAB rejects the
-    % next assignment as an assignment between dissimilar structures.
-    results(kk) = caseResult;
+    % Store cases in a cell array while the loop is running.  Initializing
+    % results with struct([]) creates a fieldless structure in MATLAB, which
+    % cannot accept a populated structure by subscripted assignment.
+    resultCells{kk} = caseResult;
 
     fprintf('  MC mean        = [% .6f % .6f % .6f]\n', ...
-        results(kk).mcMean);
+        caseResult.mcMean);
     fprintf('  MC mean SE     = [% .2e % .2e % .2e]\n', ...
-        results(kk).mcMeanSE);
-    fprintf('  mean error     = %.3e\n',results(kk).meanError);
+        caseResult.mcMeanSE);
+    fprintf('  mean error     = %.3e\n',caseResult.meanError);
     fprintf('  SDP second     = [% .6f % .6f % .6f]\n', ...
-        results(kk).second);
+        caseResult.second);
     fprintf('  MC second      = [% .6f % .6f % .6f]\n', ...
-        results(kk).mcSecond);
+        caseResult.mcSecond);
     fprintf('  MC second SE   = [% .2e % .2e % .2e]\n', ...
-        results(kk).mcSecondSE);
-    fprintf('  second error   = %.3e\n',results(kk).secondError);
+        caseResult.mcSecondSE);
+    fprintf('  second error   = %.3e\n',caseResult.secondError);
 end
+
+results = vertcat(resultCells{:});
 
 write_validation_table(results,'lorenz_occ_validation.csv');
 
@@ -384,6 +389,8 @@ function result = solve_transport_case( ...
                 yTerm,idxState,basisLocalizingState,coord) >= 0]; %#ok<AGROW>
     end
 
+    % This is the same minimum-norm selection objective used in the chapter
+    % computation.  It does not modify any feasibility constraint.
     objective = regularizationWeight*(yOcc.'*yOcc + yTerm.'*yTerm);
 
     solveTimer = tic;
