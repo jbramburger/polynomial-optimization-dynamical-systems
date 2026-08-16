@@ -18,7 +18,9 @@
 %     int (partial_s v + T*grad_x(v).f) deta_bar
 %         = int v(1,x) dmu_T - int v(0,x) dmu_0.
 %
-% and reconstructs a polynomial density for the terminal measure.
+% and reconstructs a polynomial density for the terminal measure. Validation
+% includes Monte Carlo standard errors, second-moment comparisons, degree
+% refinement, and an optional regularizer-sensitivity study.
 %
 % Pressing Run should reproduce the numerical output and save:
 %
@@ -26,6 +28,7 @@
 %     lorenz_occ_density_T_1.pdf
 %     lorenz_occ_density_T_5.pdf
 %     lorenz_occ_density_T_10.pdf
+%     lorenz_occ_validation.csv
 %
 % Requirements:
 %   - MATLAB
@@ -44,8 +47,15 @@ sigma = 10;
 rho   = 28;
 beta  = 8/3;
 
-momentDegree = 10;
+plotDegree = 10;
 terminalTimes = [0.5 1 5 10];
+
+refinementDegrees = [8 10 12];
+refinementTimes = [1 5];
+
+regularizationWeight = 1e-9;
+runRegularizerSweep = true;
+regularizerWeights = [1e-10 1e-9 1e-8];
 
 Tattr = 160;
 dtAttr = 0.001;
@@ -54,7 +64,7 @@ initialCenterScaled = [0.746040; 0.331799; 0.668536];
 initialRadiusScaled = 0.025;
 
 numInitialPlotPoints = 1200;
-numValidationPoints = 250;
+numValidationPoints = 2000;
 
 solver_name = 'mosek';
 verbose_solver = 1;
@@ -77,7 +87,8 @@ fprintf('Lorenz parameters:\n');
 fprintf('  sigma = %.6g\n', sigma);
 fprintf('  rho   = %.6g\n', rho);
 fprintf('  beta  = %.6g\n', beta);
-fprintf('Moment degree d = %d\n\n', momentDegree);
+fprintf('Plotting degree d = %d\n', plotDegree);
+fprintf('Refinement degrees = [%s]\n\n', num2str(refinementDegrees));
 
 fprintf('Simulating Lorenz attractor for scaling and plotting...\n');
 
@@ -117,116 +128,105 @@ fprintf('  radius = %.6f\n\n', initialRadiusScaled);
 vectorFieldTerms = scaled_lorenz_polynomial_terms( ...
     center(:), scale(:), sigma, rho, beta);
 
-basisState = monomial_basis_3d(momentDegree);
-numStateMoments = size(basisState,1);
-idxState = make_index_map_3d(basisState);
-
-basisOcc = monomial_basis_4d(momentDegree);
-numOccMoments = size(basisOcc,1);
-idxOcc = make_index_map_4d(basisOcc);
-
-%% Prescribed initial moments
-
-initialMoments = zeros(numStateMoments,1);
-
-for k = 1:numStateMoments
-    initialMoments(k) = shifted_ball_moment( ...
-        basisState(k,:), initialCenterScaled(:).', initialRadiusScaled);
-end
-
 Y0validation = sample_ball(numValidationPoints, ...
     initialCenterScaled(:).', initialRadiusScaled);
 X0validation = Y0validation.*scale + center;
 
-%% Solve occupation-measure SDP for each terminal time
+%% Independent Monte Carlo reference with sampling uncertainty
+
+fprintf('Computing Monte Carlo reference with %d initial points...\n', ...
+    numValidationPoints);
+
+mcStats = monte_carlo_terminal_statistics( ...
+    X0validation,terminalTimes,sigma,rho,beta,center,scale,optsODE);
+
+%% Assemble baseline, degree-refinement, and regularizer-sensitivity cases
+
+cases = struct('degree',{},'T',{},'regularization',{});
+
+for T = terminalTimes
+    cases(end+1) = struct( ... %#ok<SAGROW>
+        'degree',plotDegree, ...
+        'T',T, ...
+        'regularization',regularizationWeight);
+end
+
+for d = refinementDegrees
+    if d == plotDegree
+        continue;
+    end
+    for T = refinementTimes
+        cases(end+1) = struct( ... %#ok<SAGROW>
+            'degree',d, ...
+            'T',T, ...
+            'regularization',regularizationWeight);
+    end
+end
+
+if runRegularizerSweep
+    for w = regularizerWeights
+        if abs(log10(w)-log10(regularizationWeight)) < 1e-12
+            continue;
+        end
+        for T = refinementTimes
+            cases(end+1) = struct( ... %#ok<SAGROW>
+                'degree',plotDegree, ...
+                'T',T, ...
+                'regularization',w);
+        end
+    end
+end
+
+%% Solve all requested transport relaxations
+
+results = struct([]);
+
+for kk = 1:numel(cases)
+    T = cases(kk).T;
+    d = cases(kk).degree;
+    w = cases(kk).regularization;
+
+    mcIndex = find(abs(terminalTimes-T) < 1e-12,1);
+
+    results(kk) = solve_transport_case( ...
+        d,T,w,initialCenterScaled,initialRadiusScaled, ...
+        vectorFieldTerms,optsSDP);
+
+    results(kk).mcMean = mcStats(mcIndex).mean;
+    results(kk).mcMeanSE = mcStats(mcIndex).meanSE;
+    results(kk).mcSecond = mcStats(mcIndex).second;
+    results(kk).mcSecondSE = mcStats(mcIndex).secondSE;
+    results(kk).meanError = norm( ...
+        results(kk).mean-results(kk).mcMean);
+    results(kk).secondError = norm( ...
+        results(kk).second-results(kk).mcSecond);
+
+    fprintf('  MC mean        = [% .6f % .6f % .6f]\n', ...
+        results(kk).mcMean);
+    fprintf('  MC mean SE     = [% .2e % .2e % .2e]\n', ...
+        results(kk).mcMeanSE);
+    fprintf('  mean error     = %.3e\n',results(kk).meanError);
+    fprintf('  SDP second     = [% .6f % .6f % .6f]\n', ...
+        results(kk).second);
+    fprintf('  MC second      = [% .6f % .6f % .6f]\n', ...
+        results(kk).mcSecond);
+    fprintf('  MC second SE   = [% .2e % .2e % .2e]\n', ...
+        results(kk).mcSecondSE);
+    fprintf('  second error   = %.3e\n',results(kk).secondError);
+end
+
+write_validation_table(results,'lorenz_occ_validation.csv');
+
+%% Extract degree-10 baseline moments used in the figures
 
 terminalMoments = cell(numel(terminalTimes),1);
+terminalBases = cell(numel(terminalTimes),1);
 
 for kk = 1:numel(terminalTimes)
-
-    T = terminalTimes(kk);
-
-    fprintf('\n------------------------------------------------------------\n');
-    fprintf('Solving occupation-measure SDP for T = %g\n', T);
-    fprintf('------------------------------------------------------------\n');
-
-    yOcc  = sdpvar(numOccMoments,1);
-    yTerm = sdpvar(numStateMoments,1);
-
-    constraints = [];
-
-    %% Liouville constraints
-
-    constraints = [constraints, build_liouville_constraints( ...
-        yOcc, yTerm, initialMoments, basisOcc, idxOcc, idxState, ...
-        vectorFieldTerms, momentDegree, T)];
-
-    %% Mass constraints
-
-    constraints = [
-        constraints, ...
-        moment_expr_4d(yOcc,idxOcc,0,0,0,0) == 1, ...
-        moment_expr_3d(yTerm,idxState,0,0,0) == 1
-        ];
-
-    %% Support constraints on K = [-1,1]^3
-
-    basisMomentOcc = monomial_basis_4d(floor(momentDegree/2));
-    basisMomentState = monomial_basis_3d(floor(momentDegree/2));
-
-    constraints = [
-        constraints, ...
-        build_moment_matrix_4d(yOcc,idxOcc,basisMomentOcc) >= 0, ...
-        build_moment_matrix_3d(yTerm,idxState,basisMomentState) >= 0
-        ];
-
-    basisLocalizingOcc = monomial_basis_4d(floor((momentDegree-2)/2));
-    basisLocalizingState = monomial_basis_3d(floor((momentDegree-2)/2));
-
-    constraints = [constraints, ...
-        build_time_localizing_matrix_4d( ...
-            yOcc,idxOcc,basisLocalizingOcc) >= 0];
-
-    for coord = 1:3
-        constraints = [
-            constraints, ...
-            build_cube_localizing_matrix_4d( ...
-                yOcc,idxOcc,basisLocalizingOcc,coord) >= 0, ...
-            build_cube_localizing_matrix_3d( ...
-                yTerm,idxState,basisLocalizingState,coord) >= 0
-            ]; %#ok<AGROW>
-    end
-
-    %% Small regularization for reproducible feasible terminal moments
-
-    objective = 1e-9*(yOcc.'*yOcc + yTerm.'*yTerm);
-
-    diagnostics = optimize(constraints,objective,optsSDP);
-
-    fprintf('  status: %s\n', diagnostics.info);
-
-    if diagnostics.problem ~= 0
-        warning('SDP at T = %g did not solve cleanly.', T);
-    end
-
-    yTermValue = value(yTerm);
-    terminalMoments{kk} = yTermValue;
-
-    terminalMass = yTermValue(get_idx_3d(idxState,0,0,0));
-
-    terminalMean = [
-        yTermValue(get_idx_3d(idxState,1,0,0));
-        yTermValue(get_idx_3d(idxState,0,1,0));
-        yTermValue(get_idx_3d(idxState,0,0,1))
-    ]/terminalMass;
-
-    terminalMeanMC = monte_carlo_terminal_mean( ...
-        X0validation,T,sigma,rho,beta,center,scale,optsODE);
-
-    fprintf('  terminal mass = %.8f\n', terminalMass);
-    fprintf('  terminal mean = [% .6f % .6f % .6f]\n', terminalMean);
-    fprintf('  Monte Carlo   = [% .6f % .6f % .6f]\n', terminalMeanMC);
-    fprintf('  mean error    = %.3e\n', norm(terminalMean-terminalMeanMC));
+    idx = find_baseline_result( ...
+        results,plotDegree,terminalTimes(kk),regularizationWeight);
+    terminalMoments{kk} = results(idx).yTerm;
+    terminalBases{kk} = results(idx).basisState;
 end
 
 %% Reconstruct terminal densities on the cube and evaluate on attractor
@@ -240,7 +240,7 @@ for kk = 1:numel(terminalTimes)
     fprintf('\nReconstructing density for T = %g\n', T);
 
     [densityCoeff,densityBasis] = reconstruct_density_cube_3d( ...
-        terminalMoments{kk}, basisState, momentDegree);
+        terminalMoments{kk}, terminalBases{kk}, plotDegree);
 
     rhoAttr = zeros(size(Yattr,1),1);
 
@@ -265,7 +265,8 @@ for kk = 1:numel(terminalTimes)
 
     T = terminalTimes(kk);
 
-    fig = figure('Color','w','Position',[100 100 1100 900]);
+    fig = figure;
+    set(fig,'Color','w','Units','centimeters','Position',[2 2 14 11]);
 
     ax = axes('Parent',fig);
     hold(ax,'on');
@@ -303,11 +304,11 @@ for kk = 1:numel(terminalTimes)
 
     view(ax,35,22);
 
-    set(ax,'FontSize',46);
+    set(ax,'FontSize',32,'TickLabelInterpreter','latex');
 
-    xlabel(ax,'$x$','Interpreter','latex','FontSize',56,'FontWeight','bold');
-    ylabel(ax,'$y$','Interpreter','latex','FontSize',56,'FontWeight','bold');
-    zlabel(ax,'$z$','Interpreter','latex','FontSize',56,'FontWeight','bold');
+    xlabel(ax,'$x$','Interpreter','latex','FontSize',42,'FontWeight','bold');
+    ylabel(ax,'$y$','Interpreter','latex','FontSize',42,'FontWeight','bold');
+    zlabel(ax,'$z$','Interpreter','latex','FontSize',42,'FontWeight','bold');
 
     axis(ax,'equal');
     axis(ax,'tight');
@@ -323,6 +324,224 @@ end
 fprintf('\nFinished Lorenz occupation-measure transport example.\n');
 
 %% Local functions
+
+function result = solve_transport_case( ...
+    momentDegree,T,regularizationWeight,initialCenterScaled, ...
+    initialRadiusScaled,vectorFieldTerms,optsSDP)
+
+    fprintf('\n------------------------------------------------------------\n');
+    fprintf('Solving SDP: degree d = %d, T = %g, regularizer = %.1e\n', ...
+        momentDegree,T,regularizationWeight);
+    fprintf('------------------------------------------------------------\n');
+
+    basisState = monomial_basis_3d(momentDegree);
+    numStateMoments = size(basisState,1);
+    idxState = make_index_map_3d(basisState);
+
+    basisOcc = monomial_basis_4d(momentDegree);
+    numOccMoments = size(basisOcc,1);
+    idxOcc = make_index_map_4d(basisOcc);
+
+    initialMoments = zeros(numStateMoments,1);
+    for k = 1:numStateMoments
+        initialMoments(k) = shifted_ball_moment( ...
+            basisState(k,:),initialCenterScaled(:).',initialRadiusScaled);
+    end
+
+    yOcc = sdpvar(numOccMoments,1);
+    yTerm = sdpvar(numStateMoments,1);
+
+    constraints = build_liouville_constraints( ...
+        yOcc,yTerm,initialMoments,basisOcc,idxOcc,idxState, ...
+        vectorFieldTerms,momentDegree,T);
+
+    constraints = [constraints, ...
+        moment_expr_4d(yOcc,idxOcc,0,0,0,0) == 1, ...
+        moment_expr_3d(yTerm,idxState,0,0,0) == 1];
+
+    basisMomentOcc = monomial_basis_4d(floor(momentDegree/2));
+    basisMomentState = monomial_basis_3d(floor(momentDegree/2));
+
+    constraints = [constraints, ...
+        build_moment_matrix_4d(yOcc,idxOcc,basisMomentOcc) >= 0, ...
+        build_moment_matrix_3d(yTerm,idxState,basisMomentState) >= 0];
+
+    basisLocalizingOcc = monomial_basis_4d(floor((momentDegree-2)/2));
+    basisLocalizingState = monomial_basis_3d(floor((momentDegree-2)/2));
+
+    constraints = [constraints, ...
+        build_time_localizing_matrix_4d( ...
+            yOcc,idxOcc,basisLocalizingOcc) >= 0];
+
+    for coord = 1:3
+        constraints = [constraints, ...
+            build_cube_localizing_matrix_4d( ...
+                yOcc,idxOcc,basisLocalizingOcc,coord) >= 0, ...
+            build_cube_localizing_matrix_3d( ...
+                yTerm,idxState,basisLocalizingState,coord) >= 0]; %#ok<AGROW>
+    end
+
+    objective = regularizationWeight*(yOcc.'*yOcc + yTerm.'*yTerm);
+
+    solveTimer = tic;
+    diagnostics = optimize(constraints,objective,optsSDP);
+    solveTime = toc(solveTimer);
+
+    fprintf('  status          = %s\n',diagnostics.info);
+    fprintf('  solve time      = %.2f s\n',solveTime);
+
+    if diagnostics.problem ~= 0
+        warning('SDP at d = %d and T = %g did not solve cleanly.', ...
+            momentDegree,T);
+    end
+
+    yTermValue = value(yTerm);
+    terminalMass = yTermValue(get_idx_3d(idxState,0,0,0));
+
+    terminalMean = [
+        yTermValue(get_idx_3d(idxState,1,0,0));
+        yTermValue(get_idx_3d(idxState,0,1,0));
+        yTermValue(get_idx_3d(idxState,0,0,1))
+    ]/terminalMass;
+
+    terminalSecond = [
+        yTermValue(get_idx_3d(idxState,2,0,0));
+        yTermValue(get_idx_3d(idxState,0,2,0));
+        yTermValue(get_idx_3d(idxState,0,0,2))
+    ]/terminalMass;
+
+    fprintf('  terminal mass   = %.10f\n',terminalMass);
+    fprintf('  terminal mean   = [% .6f % .6f % .6f]\n',terminalMean);
+
+    result = struct();
+    result.degree = momentDegree;
+    result.T = T;
+    result.regularization = regularizationWeight;
+    result.statusCode = diagnostics.problem;
+    result.status = diagnostics.info;
+    result.solveTime = solveTime;
+    result.mass = terminalMass;
+    result.mean = terminalMean;
+    result.second = terminalSecond;
+    result.yTerm = yTermValue;
+    result.basisState = basisState;
+end
+
+function stats = monte_carlo_terminal_statistics( ...
+    X0,terminalTimes,sigma,rho,beta,center,scale,optsODE)
+
+    n = size(X0,1);
+    nTimes = numel(terminalTimes);
+    samples = cell(nTimes,1);
+
+    for kk = 1:nTimes
+        samples{kk} = zeros(n,3);
+    end
+
+    outputTimes = unique([0 terminalTimes]);
+
+    for j = 1:n
+        [tOut,trajectory] = ode45( ...
+            @(t,x) lorenz_rhs(t,x,sigma,rho,beta), ...
+            outputTimes,X0(j,:).',optsODE);
+
+        for kk = 1:nTimes
+            row = find(abs(tOut-terminalTimes(kk)) < 1e-10,1);
+            if isempty(row)
+                error('Requested terminal time was not returned by ode45.');
+            end
+            samples{kk}(j,:) = (trajectory(row,:)-center)./scale;
+        end
+
+        if mod(j,max(1,round(n/10))) == 0
+            fprintf('  Monte Carlo progress: %d/%d\n',j,n);
+        end
+    end
+
+    stats = repmat(struct(),nTimes,1);
+
+    for kk = 1:nTimes
+        values = samples{kk};
+        valuesSquared = values.^2;
+
+        stats(kk).T = terminalTimes(kk);
+        stats(kk).mean = mean(values,1).';
+        stats(kk).meanSE = std(values,0,1).'/sqrt(n);
+        stats(kk).second = mean(valuesSquared,1).';
+        stats(kk).secondSE = std(valuesSquared,0,1).'/sqrt(n);
+    end
+end
+
+function idx = find_baseline_result(results,degree,T,regularizationWeight)
+
+    degreeMatch = [results.degree] == degree;
+    timeMatch = abs([results.T]-T) < 1e-12;
+    regMatch = abs(log10([results.regularization]) ...
+        - log10(regularizationWeight)) < 1e-12;
+
+    idx = find(degreeMatch & timeMatch & regMatch,1);
+
+    if isempty(idx)
+        error('Could not locate requested baseline result.');
+    end
+end
+
+function write_validation_table(results,fileName)
+
+    n = numel(results);
+
+    degree = zeros(n,1);
+    T = zeros(n,1);
+    regularization = zeros(n,1);
+    statusCode = zeros(n,1);
+    solveTime = zeros(n,1);
+    mass = zeros(n,1);
+    meanSDP = zeros(n,3);
+    meanMC = zeros(n,3);
+    meanSE = zeros(n,3);
+    secondSDP = zeros(n,3);
+    secondMC = zeros(n,3);
+    secondSE = zeros(n,3);
+    meanError = zeros(n,1);
+    secondError = zeros(n,1);
+
+    for k = 1:n
+        degree(k) = results(k).degree;
+        T(k) = results(k).T;
+        regularization(k) = results(k).regularization;
+        statusCode(k) = results(k).statusCode;
+        solveTime(k) = results(k).solveTime;
+        mass(k) = results(k).mass;
+        meanSDP(k,:) = results(k).mean.';
+        meanMC(k,:) = results(k).mcMean.';
+        meanSE(k,:) = results(k).mcMeanSE.';
+        secondSDP(k,:) = results(k).second.';
+        secondMC(k,:) = results(k).mcSecond.';
+        secondSE(k,:) = results(k).mcSecondSE.';
+        meanError(k) = results(k).meanError;
+        secondError(k) = results(k).secondError;
+    end
+
+    validationTable = table( ...
+        degree,T,regularization,statusCode,solveTime,mass, ...
+        meanSDP(:,1),meanSDP(:,2),meanSDP(:,3), ...
+        meanMC(:,1),meanMC(:,2),meanMC(:,3), ...
+        meanSE(:,1),meanSE(:,2),meanSE(:,3),meanError, ...
+        secondSDP(:,1),secondSDP(:,2),secondSDP(:,3), ...
+        secondMC(:,1),secondMC(:,2),secondMC(:,3), ...
+        secondSE(:,1),secondSE(:,2),secondSE(:,3),secondError, ...
+        'VariableNames',{ ...
+        'degree','T','regularization','statusCode','solveTime','mass', ...
+        'meanSDP_X','meanSDP_Y','meanSDP_Z', ...
+        'meanMC_X','meanMC_Y','meanMC_Z', ...
+        'meanSE_X','meanSE_Y','meanSE_Z','meanError', ...
+        'secondSDP_X','secondSDP_Y','secondSDP_Z', ...
+        'secondMC_X','secondMC_Y','secondMC_Z', ...
+        'secondSE_X','secondSE_Y','secondSE_Z','secondError'});
+
+    writetable(validationTable,fileName);
+    fprintf('\nSaved validation table: %s\n',fileName);
+end
 
 function dx = lorenz_rhs(~,x,sigma,rho,beta)
 
@@ -739,22 +958,6 @@ function q = prctile_no_toolbox(x,p)
     else
         q = x(k0) + (k-k0)*(x(k1)-x(k0));
     end
-end
-
-function meanScaled = monte_carlo_terminal_mean( ...
-    X0,T,sigma,rho,beta,center,scale,optsODE)
-
-    n = size(X0,1);
-    finalScaled = zeros(n,3);
-
-    for j = 1:n
-        [~,trajectory] = ode45( ...
-            @(t,x) lorenz_rhs(t,x,sigma,rho,beta), ...
-            [0 T],X0(j,:).',optsODE);
-        finalScaled(j,:) = (trajectory(end,:)-center)./scale;
-    end
-
-    meanScaled = mean(finalScaled,1).';
 end
 
 function str = time_to_filename(T)
