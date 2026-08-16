@@ -1,4 +1,4 @@
-%% lorenz_occupation_measure_transport.m
+%% lorenz_occupation_measure_transport_revised3.m
 % Polynomial Optimization Methods for Dynamical Systems
 % Auxiliary Functions, Sum-of-Squares Programming, and Applications
 %
@@ -188,18 +188,21 @@ for kk = 1:numel(cases)
 
     mcIndex = find(abs(terminalTimes-T) < 1e-12,1);
 
-    results(kk) = solve_transport_case( ...
+    caseResult = solve_transport_case( ...
         d,T,w,initialCenterScaled,initialRadiusScaled, ...
         vectorFieldTerms,optsSDP);
 
-    results(kk).mcMean = mcStats(mcIndex).mean;
-    results(kk).mcMeanSE = mcStats(mcIndex).meanSE;
-    results(kk).mcSecond = mcStats(mcIndex).second;
-    results(kk).mcSecondSE = mcStats(mcIndex).secondSE;
-    results(kk).meanError = norm( ...
-        results(kk).mean-results(kk).mcMean);
-    results(kk).secondError = norm( ...
-        results(kk).second-results(kk).mcSecond);
+    caseResult.mcMean = mcStats(mcIndex).mean;
+    caseResult.mcMeanSE = mcStats(mcIndex).meanSE;
+    caseResult.mcSecond = mcStats(mcIndex).second;
+    caseResult.mcSecondSE = mcStats(mcIndex).secondSE;
+    caseResult.meanError = norm(caseResult.mean-caseResult.mcMean);
+    caseResult.secondError = norm(caseResult.second-caseResult.mcSecond);
+
+    % Append only after every field has been added.  Otherwise the first
+    % iteration changes the field layout of results, and MATLAB rejects the
+    % next assignment as an assignment between dissimilar structures.
+    results(kk) = caseResult;
 
     fprintf('  MC mean        = [% .6f % .6f % .6f]\n', ...
         results(kk).mcMean);
