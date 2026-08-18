@@ -141,20 +141,26 @@ roundedCoefficientResidual = ...
 fprintf('Rounded x^2 coefficient residual = %.6e\n', ...
     roundedCoefficientResidual);
 
-%% Exact projection onto the affine coefficient constraints
+%% Exact Frobenius projection onto the affine coefficient constraints
 
-% Project the rounded entries r13 and r22 onto the affine family
+% Let R be the symmetric entrywise-rationalized matrix. We seek the member
 %
-%     Q(t) = [1, 0, t; 0, 2-2t, 0; t, 0, 1].
+%     Q(t) = [1, 0, t; 0, 2-2*t, 0; t, 0, 1]
 %
-% Minimizing the Frobenius distance gives
+% minimizing ||Q(t)-R||_F. Since the off-diagonal entry occurs twice,
 %
-%     t = (2 + r13 - r22)/3.
+%   ||Q(t)-R||_F^2
+%       = constant
+%         + 2*(t-r13)^2
+%         + (2-2*t-r22)^2.
 %
-% The calculation below is performed using integer fraction arithmetic:
+% Differentiation gives
 %
-%     r13 = n13/d13,
-%     r22 = n22/d22.
+%     t = (2+r13-r22)/3.
+%
+% Because r13 and r22 are rational, this projection can be evaluated using
+% rational arithmetic and produces a rational matrix satisfying the
+% coefficient constraints exactly.
 
 projectedNumerator = ...
     2*d13*d22 + n13*d22 - n22*d13;
