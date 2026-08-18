@@ -59,21 +59,26 @@ S.blue  = [0, 92, 175]/255;
 
 sdpvar lambda x u v
 
-%% Witten-Laplacian potential in rescaled coordinates
+%% Witten-Laplacian potential used by the variational problem
 
 w = -0.5*( ...
         -alpha*(2*L*x - 1) ...
         + (2 - 3*L*x)*L*x ) ...
     + (1/(sigmaNoise^2))*((L*x)*(1 - L*x)*(L*x + alpha))^2;
 
-%% Variational SOS inequality
+%% Variational integrand and rational null-Lagrangian field
 
-p = (sigmaNoise^2)*v^2/L^2 + w*u^2 - lambda*u^2;
+kappa = sigmaNoise^2/L^2;
+p = kappa*v^2 + w*u^2 - lambda*u^2;
 
-[f,cf] = polynomial(x,degree);
+% The optimized rational field is f(x)=fNumerator(x)/(1-x^2).
+[fNumerator,cf] = polynomial(x,degree);
 
-dfdx = jacobian(f,x);
-df = dfdx*(1 - x^2) + 2*f*x;
+dfdx = jacobian(fNumerator,x);
+g = 1-x^2;
+
+% g^2*d(fNumerator/g)/dx = g*fNumerator' + 2*x*fNumerator.
+divergenceNumerator = dfdx*g + 2*fNumerator*x;
 
 %% Polynomial multiplier with degree restriction in u and v
 
@@ -83,7 +88,6 @@ powers = powers(powers(:,2) + powers(:,3) <= 2,:);
 cs = sdpvar(size(powers,1),1);
 
 s = 0;
-
 for k = 1:size(powers,1)
     s = s + cs(k)*prod([x u v].^powers(k,:));
 end
@@ -91,10 +95,10 @@ end
 %% SOS lower-bound problem
 
 sosPolynomial = ...
-    p*(1 - x^2)^2 ...
-    + df*u^2 ...
-    + 2*f*v*u*(1 - x^2) ...
-    - (1 - x^2)*s;
+    p*g^2 ...
+    + divergenceNumerator*u^2 ...
+    + 2*fNumerator*v*u*g ...
+    - g*s;
 
 constraints = [
     sos(sosPolynomial), ...
@@ -122,57 +126,73 @@ lambdaLower = value(lambda);
 
 fprintf('SOS lower bound on principal eigenvalue: %.12e\n',lambdaLower);
 
-%% Recover approximate eigenfunction
+%% Reconstruct the eigenfunction from the optimized null Lagrangian
 
 xPlot = linspace(-xEnd,xEnd,numGrid);
 
-fApprox = clean(replace(f,cf,value(cf)),1e-10);
-fHandle = yalmip_polynomial_to_function(fApprox,x);
+fNumeratorApprox = clean( ...
+    replace(fNumerator,cf,value(cf)),1e-10);
+fNumeratorHandle = yalmip_polynomial_to_function( ...
+    fNumeratorApprox,x);
 
 t = linspace(0,1,2001);
-
-logU = zeros(size(xPlot));
+logEigenfunction = zeros(size(xPlot));
 
 for i = 1:numel(xPlot)
-
     xi = xPlot(i);
     xt = xi*t;
 
-    logGradU = xi*fHandle(xt)./(1 - xt.^2);
+    % Near optimality,
+    %
+    %   fNumerator(x)/(1-x^2) ~= -kappa*u_H'(x)/u_H(x).
+    %
+    % Hence the integral below reconstructs log(u_H(x)/u_H(0)).
+    logGradient = ...
+        xi*fNumeratorHandle(xt)./(1-xt.^2);
 
-    logU(i) = -trapz(t,logGradU);
+    logEigenfunction(i) = ...
+        -trapz(t,logGradient)/kappa;
 end
 
-uStar = exp(logU*L^2/sigmaNoise^2);
+% The multiplicative normalization is arbitrary. Subtracting the maximum
+% before exponentiation prevents overflow without changing the profile.
+uSymApprox = exp(logEigenfunction-max(logEigenfunction));
 
-%% Undo symmetrization
+%% Transform the recovered eigenfunction to the plotted density profile
 
 physicalX = L*xPlot;
-
 potential = double_well_potential(physicalX,alpha);
 
-vStar = uStar.*exp(-0.5*potential/(sigmaNoise^2/L^2));
+% Multiplication by the Gibbs half-weight converts the recovered
+% symmetrized eigenfunction to the quasistationary profile. The nontrivial
+% eigenfunction factor comes entirely from the optimized null Lagrangian;
+% no exact density is inserted into the computation.
+logQsdApprox = logEigenfunction ...
+    - 0.5*potential/(sigmaNoise^2/L^2);
+qsdApprox = exp(logQsdApprox-max(logQsdApprox));
 
-%% Rayleigh quotient upper bound
+% Normalize in the physical coordinate so the plotted curve is a density.
+qsdApprox = qsdApprox/trapz(physicalX,qsdApprox);
 
-normU = trapz(xPlot,uStar.^2);
+%% Rayleigh quotient upper estimate from the same reconstruction
 
-gradU = uStar.*fHandle(xPlot)./(1 - xPlot.^2);
+normU = trapz(xPlot,uSymApprox.^2);
 
-normGradU = (L^2/sigmaNoise^2)*trapz(xPlot,gradU.^2);
+gradFactor = ...
+    uSymApprox.*fNumeratorHandle(xPlot)./(1-xPlot.^2);
+normGradU = (L^2/sigmaNoise^2)*trapz(xPlot,gradFactor.^2);
 
 wHandle = yalmip_polynomial_to_function(w,x);
-
-normPotential = trapz(xPlot,wHandle(xPlot).*uStar.^2);
+normPotential = trapz(xPlot,wHandle(xPlot).*uSymApprox.^2);
 
 lambdaUpper = (normGradU + normPotential)/normU;
 
 %% Print summary
 
 fprintf('\nBounds using degree %d polynomials:\n',degree);
-fprintf('  Upper bound = %.12e\n',lambdaUpper);
-fprintf('  Lower bound = %.12e\n',lambdaLower);
-fprintf('  Gap         = %.12e\n',lambdaUpper - lambdaLower);
+fprintf('  Upper estimate = %.12e\n',lambdaUpper);
+fprintf('  Lower bound    = %.12e\n',lambdaLower);
+fprintf('  Gap            = %.12e\n',lambdaUpper-lambdaLower);
 
 %% Figure 1: potential landscape
 
@@ -183,49 +203,51 @@ plot(physicalX,potential, ...
     'Color',S.black, ...
     'LineWidth',3);
 
-xlabel('$x$','Interpreter','latex','FontSize',28,'FontWeight','bold');
-ylabel('$V(x)$','Interpreter','latex','FontSize',28,'FontWeight','bold');
+xlabel('$\xi$','Interpreter','latex','FontSize',28,'FontWeight','bold');
+ylabel('$U(\xi)$','Interpreter','latex','FontSize',28,'FontWeight','bold');
 
 set(gca,'FontSize',22,'TickLabelInterpreter','latex');
 
 box on
 grid on
+xlim([-L L])
 
 if saveFigures
     export_pdf(fig1,'double_well_potential.pdf');
 end
 
-%% Figure 2: approximate leading eigenfunction
+%% Figure 2: reconstructed quasistationary profile
 
 fig2 = figure;
 set(fig2,'Color','w');
 
-plot(physicalX,vStar, ...
+plot(physicalX,qsdApprox, ...
     'Color',S.blue, ...
     'LineWidth',4);
 
-xlabel('$x$','Interpreter','latex','FontSize',36,'FontWeight','bold');
-ylabel('$u_0(x)$','Interpreter','latex','FontSize',36,'FontWeight','bold');
+xlabel('$\xi$','Interpreter','latex','FontSize',36,'FontWeight','bold');
+ylabel('$\rho_{0,d}(\xi)$','Interpreter','latex','FontSize',36, ...
+    'FontWeight','bold');
 
 set(gca,'FontSize',24,'TickLabelInterpreter','latex');
 
 box on
 grid on
-xlim([-3 3])
+xlim([-L L])
 
 if saveFigures
-    export_pdf(fig2,'double_well_eigenfunction.pdf');
+    export_pdf(fig2,'double_well_qsd.pdf');
 end
 
 fprintf('\nFinished double-well escape-rate example.\n');
 
 %% Local functions
 
-function V = double_well_potential(x,alpha)
+function U = double_well_potential(x,alpha)
 
-    V = (1/12)*x.^2.*( ...
-        -alpha*(6 - 4*x) ...
-        + x.*(3*x - 4));
+    U = (1/12)*x.^2.*( ...
+        -alpha*(6-4*x) ...
+        + x.*(3*x-4));
 end
 
 function fh = yalmip_polynomial_to_function(poly,var)
